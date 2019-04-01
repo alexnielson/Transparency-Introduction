@@ -1,0 +1,205 @@
+---
+title: "An Introduction to Transparency: West Bountiful City"
+author: "Michael Jensen"
+output: html_notebook
+---
+# Connect to AWS
+
+```{r}
+library(odbc)
+
+# "transpAWS" is what I've named my connection to AWS. Yours may be different.
+odbc_aws <- dbConnect(odbc::odbc(), "transpAWS")
+```
+
+# What tables exist in the Transparency database?
+
+```{sql, connection=odbc_aws, output.var=table_names_of_tables}
+SELECT TABLE_NAME
+FROM information_schema.tables
+WHERE TABLE_SCHEMA = "transparency"
+```
+
+# What is West Bountiful City's Transparency ID?
+
+```{r}
+# Query names and IDs from the entity table:
+table_entity <- 
+  dbGetQuery(
+    odbc_aws,
+    "
+    SELECT name, id
+    FROM entity")
+```
+
+West Bountiful's Transparency ID: 623
+
+# Who uploads data for West Bountiful?
+
+```{r}
+usernames <- 
+  dbGetQuery(
+    odbc_aws,
+    "
+    SELECT DISTINCT upload_username, upload_date
+    FROM batch
+    WHERE entity_id = 623
+    ORDER BY upload_date DESC")
+```
+
+# What's an overview of the files West Bountiful has uploaded?
+
+```{r}
+table_batch <- 
+  dbGetQuery(
+    odbc_aws,
+    "
+    SELECT 
+      id, 
+      upload_date, 
+      processed_date,
+      file_record_count,
+      file_total_amount,
+      begin_txn_date,
+      end_txn_date,
+      status,
+      status_message
+    FROM batch
+    WHERE entity_id = 623
+    ORDER BY upload_date DESC")
+```
+
+# What expense transactions are contained in the most recently processed batch, ordered from highest to lowest?
+
+```{r}
+batch_id <- 
+  dbGetQuery(
+    odbc_aws,
+    "
+    SELECT id
+    FROM batch
+    WHERE entity_id = 623
+    AND status = 'PROCESSED'
+    ORDER BY processed_date DESC
+    LIMIT 1")
+
+batch_id <- batch_id$id[[1]]
+
+table_transactions <- 
+  dbGetQuery(
+    odbc_aws,
+    paste("
+          SELECT 
+            posting_date,
+            amount,
+            fiscal_year,
+            entity_trans_id,
+            description,
+            org1, org2, org3,
+            cat1, cat2, cat3,
+            fund1, fund2,
+            vendor_id
+          FROM transaction
+          WHERE batch_id = ", batch_id, "
+          AND type = 1
+          ORDER BY amount DESC"))  # type = 1: expense, type = 2: revenue
+```
+
+# What does org1, org2, org3, cat1, etc. mean?
+
+```{r}
+table_transaction_group <- 
+  dbGetQuery(
+    odbc_aws,
+    "
+    SELECT id, name
+    FROM transaction_group")
+```
+
+```{r}
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("org1" = "id")) %>% 
+  select(-org1) %>% 
+  rename(org1 = name)
+
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("org2" = "id")) %>% 
+  select(-org2) %>% 
+  rename(org2 = name)
+
+
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("org3" = "id")) %>% 
+  select(-org3) %>% 
+  rename(org3 = name)
+
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("cat1" = "id")) %>% 
+  select(-cat1) %>% 
+  rename(cat1 = name)
+
+
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("cat2" = "id")) %>% 
+  select(-cat2) %>% 
+  rename(cat2 = name)
+
+
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("cat3" = "id")) %>% 
+  select(-cat3) %>% 
+  rename(cat3 = name)
+
+
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("fund1" = "id")) %>% 
+  select(-fund1) %>% 
+  rename(fund1 = name)
+
+
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("fund2" = "id")) %>% 
+  select(-fund2) %>% 
+  rename(fund2 = name)
+```
+
+# Who are the vendors for each transaction?
+
+```{r}
+table_vendor <- 
+  dbGetQuery(
+    odbc_aws,
+    "
+    SELECT id, name
+    FROM vendor
+    WHERE entity_id = 623")
+
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_vendor,
+            by = c("vendor_id" = "id")) %>% 
+  select(-vendor_id) %>% 
+  rename(vendor_id = name)
+```
+
+# Close
+
+```{r}
+dbDisconnect(odbc_aws)
+```
