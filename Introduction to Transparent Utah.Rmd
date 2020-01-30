@@ -1,13 +1,15 @@
 ---
 title: "An Introduction to Transparency: West Bountiful City"
-author: "Michael Jensen"
+author: "Alexander Nielson"
 output: html_notebook
 ---
+This document contains my modifcations to Michael Jensens original document. I added comments for myself which helped me better understand this document. 
+
 # Connect to AWS
 
 ```{r}
 library(odbc)
-
+library(tidyverse)# I added this so I can use pipes.
 # "transpAWS" is what I've named my connection to AWS. Yours may be different.
 odbc_aws <- dbConnect(odbc::odbc(), "transpAWS")
 ```
@@ -20,6 +22,47 @@ FROM information_schema.tables
 WHERE TABLE_SCHEMA = "transparency"
 ```
 
+The full list can be viewed in the environment tab and then clicking on the preview icon. 
+```{r}
+table_names_of_tables
+```
+the tables used in this document are batch, entitiy, transaction, and vendor. 
+If you are not interested in a analysis of the different tables, then skip down to the next R chunk.
+
+core tables: 
+- batch: 
+- contact: a table that contains commonly found contact information of entities? There are three columns in the entity database
+- entity:
+- transaction: a table which accounts for the vareity of transactions for entities. see NOTE!
+- vendor: a table that includes vendors used by the entities. 
+
+NOTE!: if you try to view the transaction table in R, it continually crashes. It might just be for my machine, but be warned. This is likely because the transaction table has 53 columns, so it is querying a lot of data to preview 1000 rows. Run the block of r code below to get the first 10 rows.
+
+more notes about the tables:
+- admin_email: is empty? I suspect it might be a anachronistic table to for entity_admin...
+- I believe all the archive tables are simply archives of the suffix. ie: archive_batch is an archive table of the batch table.
+- cms_content: contains html stuff. It does not seem to contain anything relevant to queries. 
+- entity_admin: contains admin data such as username, email, and a FK to entity_id. 
+- export_request:??? looks like it was a table used to keep track of export requests.
+- government_level: a lookup table for entity government levels.
+- invalid_uploaded_rows: a table which keeps track of invalid uploads and which row the upload was invalid for. Looks like it would be helpful for debugging. 
+- summary: ???
+- transaction_2009-2013: tables for the transaction data of suffix year. I think that these were seperated because of how large the table can get without being sliced/filtered by year.
+-transaction_group: very big lookup table for determining the transaction types. I think it is for the org1-10, cat1-7, fund1-4 columns, and possibly for the program1-7 and function 1-7 columns too.
+-vendor_summary: ??? some kind of aggregate table for vendors. 
+
+```{r}
+temp_table <- 
+  dbGetQuery(
+    odbc_aws,
+    "
+    SELECT *
+    FROM transaction_2009
+    LIMIT 10")
+temp_table %>% glimpse()
+```
+
+
 # What is West Bountiful City's Transparency ID?
 
 ```{r}
@@ -31,11 +74,17 @@ table_entity <-
     SELECT name, id
     FROM entity")
 ```
+To actually find the id, you can search through the table_entity data.frame manually, or simply run the filter below
+
+```{r}
+table_entity %>% filter(name  == "West Bountiful")
+```
 
 West Bountiful's Transparency ID: 623
 
 # Who uploads data for West Bountiful?
 
+Since entities upload their data in batches there is some basic upload data in the batch table.  
 ```{r}
 usernames <- 
   dbGetQuery(
@@ -45,7 +94,11 @@ usernames <-
     FROM batch
     WHERE entity_id = 623
     ORDER BY upload_date DESC")
+table(usernames$upload_username)#used to easily tally the usernames. 
 ```
+Looks like Most uploads are from PTwitchell(58), but voordeckers has done 3 and jeremy3walker has done 1.
+
+
 
 # What's an overview of the files West Bountiful has uploaded?
 
@@ -69,9 +122,11 @@ table_batch <-
     ORDER BY upload_date DESC")
 ```
 
-# What expense transactions are contained in the most recently processed batch, ordered from highest to lowest?
+
+# What expense transactions are contained in the most recently processed batch from West Bountiful, ordered from highest to lowest?
 
 ```{r}
+#query gets the most recently proecessed batch
 batch_id <- 
   dbGetQuery(
     odbc_aws,
@@ -83,7 +138,9 @@ batch_id <-
     ORDER BY processed_date DESC
     LIMIT 1")
 
+#returns the batch id for most recent processed
 batch_id <- batch_id$id[[1]]
+
 
 table_transactions <- 
   dbGetQuery(
@@ -104,6 +161,8 @@ table_transactions <-
           AND type = 1
           ORDER BY amount DESC"))  # type = 1: expense, type = 2: revenue
 ```
+This query can be viewed in the table_transactions data.frame. It has useful information like posting date, amount, fiscal year, and so on. 
+Notice that some of those columns like org1..., cat1..., and fund1... are not very descriptive. This is because they contain references to a lookup table called "transaction_group".
 
 # What does org1, org2, org3, cat1, etc. mean?
 
@@ -117,6 +176,10 @@ table_transaction_group <-
 ```
 
 ```{r}
+# Note run all these in one push, or at least do not repeat, since the
+# primary key is being replaced by the foreign key column ("name") 
+
+#tie in the org1 to the reference table names so we know what org1 codes mean
 table_transactions <- 
   table_transactions %>% 
   left_join(table_transaction_group,
@@ -124,6 +187,7 @@ table_transactions <-
   select(-org1) %>% 
   rename(org1 = name)
 
+#tie in the org2 to the reference table names so we know what org2 codes mean
 table_transactions <- 
   table_transactions %>% 
   left_join(table_transaction_group,
@@ -131,7 +195,7 @@ table_transactions <-
   select(-org2) %>% 
   rename(org2 = name)
 
-
+#tie in the org3 to the reference table names so we know what org3 codes mean
 table_transactions <- 
   table_transactions %>% 
   left_join(table_transaction_group,
@@ -139,6 +203,7 @@ table_transactions <-
   select(-org3) %>% 
   rename(org3 = name)
 
+#tie in the cat1 to the reference table names so we know what cat1 codes mean
 table_transactions <- 
   table_transactions %>% 
   left_join(table_transaction_group,
@@ -146,7 +211,7 @@ table_transactions <-
   select(-cat1) %>% 
   rename(cat1 = name)
 
-
+#tie in the cat2 to the reference table names so we know what cat2 codes mean
 table_transactions <- 
   table_transactions %>% 
   left_join(table_transaction_group,
@@ -154,7 +219,7 @@ table_transactions <-
   select(-cat2) %>% 
   rename(cat2 = name)
 
-
+#tie in the cat3 to the reference table names so we know what cat3 codes mean
 table_transactions <- 
   table_transactions %>% 
   left_join(table_transaction_group,
@@ -162,7 +227,7 @@ table_transactions <-
   select(-cat3) %>% 
   rename(cat3 = name)
 
-
+#tie in the fund1 to the reference table names so we know what fund1 codes mean
 table_transactions <- 
   table_transactions %>% 
   left_join(table_transaction_group,
@@ -170,7 +235,7 @@ table_transactions <-
   select(-fund1) %>% 
   rename(fund1 = name)
 
-
+#tie in the fund2 to the reference table names so we know what fund2 codes mean
 table_transactions <- 
   table_transactions %>% 
   left_join(table_transaction_group,
@@ -179,8 +244,134 @@ table_transactions <-
   rename(fund2 = name)
 ```
 
-# Who are the vendors for each transaction?
+Great! Now we can check the the table_transactions date.frame to know what those columns represent 
 
+# What about if we wanted the revenue transactions are contained in the most recently processed batch from West Bountiful, ordered from highest to lowest?
+
+```{r}
+# note that this chunk is equivalent to the expense chunk/code, except for that
+# in the type =2 instead of type=1
+
+#query gets the most recently proecessed batch
+batch_id <- 
+  dbGetQuery(
+    odbc_aws,
+    "
+    SELECT id
+    FROM batch
+    WHERE entity_id = 623
+    AND status = 'PROCESSED'
+    ORDER BY processed_date DESC
+    LIMIT 1")
+
+#returns the batch id for most recent processed
+batch_id <- batch_id$id[[1]]
+
+
+table_transactions <- 
+  dbGetQuery(
+    odbc_aws,
+    paste("
+          SELECT 
+            posting_date,
+            amount,
+            fiscal_year,
+            entity_trans_id,
+            description,
+            org1, org2, org3,
+            cat1, cat2, cat3,
+            fund1, fund2,
+            vendor_id
+          FROM transaction
+          WHERE batch_id = ", batch_id, "
+          AND type = 2
+          ORDER BY amount DESC"))  # type = 1: expense, type = 2: revenue
+
+
+```
+
+Get the necessary lookup table (only run if not already gotten above).
+```{r}
+table_transaction_group <- 
+  dbGetQuery(
+    odbc_aws,
+    "
+    SELECT id, name
+    FROM transaction_group")
+```
+
+```{r}
+# Note run all these in one push, or at least do not repeat, since the
+# primary key is being replaced by the foreign key column ("name") 
+
+#tie in the org1 to the reference table names so we know what org1 codes mean
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("org1" = "id")) %>% 
+  select(-org1) %>% 
+  rename(org1 = name)
+
+#tie in the org2 to the reference table names so we know what org2 codes mean
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("org2" = "id")) %>% 
+  select(-org2) %>% 
+  rename(org2 = name)
+
+#tie in the org3 to the reference table names so we know what org3 codes mean
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("org3" = "id")) %>% 
+  select(-org3) %>% 
+  rename(org3 = name)
+
+#tie in the cat1 to the reference table names so we know what cat1 codes mean
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("cat1" = "id")) %>% 
+  select(-cat1) %>% 
+  rename(cat1 = name)
+
+#tie in the cat2 to the reference table names so we know what cat2 codes mean
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("cat2" = "id")) %>% 
+  select(-cat2) %>% 
+  rename(cat2 = name)
+
+#tie in the cat3 to the reference table names so we know what cat3 codes mean
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("cat3" = "id")) %>% 
+  select(-cat3) %>% 
+  rename(cat3 = name)
+
+#tie in the fund1 to the reference table names so we know what fund1 codes mean
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("fund1" = "id")) %>% 
+  select(-fund1) %>% 
+  rename(fund1 = name)
+
+#tie in the fund2 to the reference table names so we know what fund2 codes mean
+table_transactions <- 
+  table_transactions %>% 
+  left_join(table_transaction_group,
+            by = c("fund2" = "id")) %>% 
+  select(-fund2) %>% 
+  rename(fund2 = name)
+```
+
+
+# Who are the vendors for each transaction?
+Notice that this code is really only useful only for expenses. When the a city makes revenues, they generally are not using a vendor. So hence "Not Applicable"
 ```{r}
 table_vendor <- 
   dbGetQuery(
